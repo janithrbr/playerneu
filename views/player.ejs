@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Playerneu</title>
+</head>
+<body>
+<div>
+  <h1>Playerneu</h1>
+  <!-- Dropdown to select the show -->
+  <label for="showSelector">Select a show:</label>
+  <select id="showSelector">
+    <!-- Options will be populated dynamically -->
+  </select>
+
+  <!-- Button to load the selected show -->
+  <button id="getShowBtn">Get show</button>
+  
+      <input type="checkbox" id="chkResume" checked>
+<label for="chkResume">Resume Playback</label>
+  
+  
+    <!-- Button to resume/continue  -->
+  <button id="resumeBtn">Resume/continue</button>
+
+  <!-- HTML Video element to play local files -->
+  <video id="videoPlayer" controls></video>
+
+	<div id="youtubePlayerContainer">
+		  <!-- YouTube iframe (hidden for now) -->
+		  <iframe id="youtubePlayer" width="1120" height="630" frameborder="0" allow="autoplay; encrypted-media" style="display:none;"></iframe>
+	</div>
+
+  <!-- IPTV video element (hidden for now) -->
+  <video id="iptvPlayer" controls style="display:none;"></video>
+</div>
+
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="/views/functions/foldernameify.js"></script>
+  <script src="/views/functions/extractYoutubeId.js"></script>
+  
+  <script>
+	let savedTimeStamp = null;
+	let showType = null;
+	let saveTimeInterval;
+	let youtubePlayerInstance;
+	let player_IsReady = false;
+	let api_IsReady =  false;
+	let player_isInitialized = false;
+  
+    // Page Load
+    document.addEventListener('DOMContentLoaded', function() {
+		console.log('💥💥💥Page load event fired');
+		console.log('🐶 Next, FETCH show names list')
+		  fetch('/shows-list')
+			.then(response => {
+					console.log('should be success')
+					console.log('🦴 Raw response:', response);
+					return response.json();
+				  })
+			.then(data => {
+			  console.log('🦴 Parsed data:', data);
+			  const showSelector = document.getElementById('showSelector');
+			  console.log('Next, attempting to populate drop down with fetched show names |||')
+			  data.forEach(show => {
+				const option = document.createElement('option');
+				option.value = show;
+				option.textContent = show;
+				showSelector.appendChild(option);
+				console.log('should be success')
+			  });
+			});
+   });
+
+    //"Get show" button
+    document.getElementById('getShowBtn').addEventListener('click', function() {
+		console.log('💥💥💥Get show button click event fired')
+		console.log('Next, attempting to run eventGetshow logic |||')
+		eventGetShow()
+    });
+	
+	//"Resume" button
+	document.getElementById('resumeBtn').addEventListener('click', function() {
+		console.log('💥💥💥Resume button click event fired')
+		console.log('Next, attempting to run eventResume logic |||')
+		eventResume()
+    });
+	
+	// "Get show" logic/code
+	function eventGetShow(){
+	  console.log('should be success')
+	  const showName = document.getElementById('showSelector').value;
+      const currentShowName = foldernameify(showName);
+	  
+	  console.log('Next, attempting to read savedTimeStamp from localStorage and save it to global variable')
+	  savedTimeStamp = localStorage.getItem(foldernameify(document.getElementById('showSelector').value));
+	  console.log('should be success')
+	  console.log('The value saved to global variable is... ' + savedTimeStamp)
+	  
+
+      fetch(`/get-show-data?show=${currentShowName}`)
+        .then(response => response.json())
+        .then(data => {
+          stopCurrentPlayback(); // Stop any current playback before switching
+		  
+		  console.log('Next, attempting to save show type into global variable')
+		  showType = data.type
+		  console.log('The value saved to global variable is... ' + showType)
+
+          if (showType=== 'file') {
+            loadLocalFile(data.filePath);
+          } else if (showType === 'youtube') {
+            loadYoutubeVideo(data.filePath);
+          } else if (showType === 'iptv') {
+            loadIptvStream(data.filePath);
+          }
+		  
+		  // Check if the "Resume playback" checkbox is checked
+		  if (document.getElementById('chkResume').checked) {
+			eventResume()
+		  }
+        });
+		
+	}
+
+
+	//"Resume" logic/code
+	function eventResume(){
+		console.log('inside the eventResume function')
+		console.log('🔷IF: checking show type')
+		if  (showType == 'file'){
+			console.log('Case 1: show type is file')
+			const videoPlayer = document.getElementById('videoPlayer');
+			const savedTime = savedTimeStamp
+			console.log('saved time read from localStorage is... ' + savedTime)
+			console.log('Next, attempting to seek to the saved time |||')
+			if (savedTime) {
+			  videoPlayer.currentTime = parseFloat(savedTime);
+			}
+			console.log('should be success')
+		}
+		else if (showType == 'youtube'){
+			console.log('Case 2: show type is youtube')
+			console.log('Is player ready?: ' + player_IsReady + '\nIs API ready?: ' + api_IsReady + '\nIs player initialized?:' + player_isInitialized)
+		    waitForTrue().then(() => {
+			    console.log("Player flag is now true!");
+			const savedTime = savedTimeStamp
+			console.log('saved time read from global variable is... ' + savedTime)
+			console.log('Next, attempting to seek to the saved time |||')
+			if (savedTime) {
+				youtubePlayerInstance.seekTo(savedTime, true)
+			}
+			console.log('should be success')
+		    });
+		}
+	}
+
+    // Function to load and play local file
+    function loadLocalFile(filePath) {
+      const videoPlayer = document.getElementById('videoPlayer');
+      videoPlayer.src = filePath;
+      videoPlayer.style.display = 'block';  // Show the video player
+	  //write timestamps
+	  videoPlayer.addEventListener('timeupdate', () => {
+		const currentTime = videoPlayer.currentTime;
+		localStorage.setItem(foldernameify(document.getElementById('showSelector').value), currentTime);
+	  });
+      videoPlayer.play();
+
+      document.getElementById('youtubePlayer').style.display = 'none';  // Hide YouTube player
+      document.getElementById('iptvPlayer').style.display = 'none';    // Hide IPTV player
+
+      // Event listener for when the video ends
+      videoPlayer.onended = function() {
+			OnendedVideo()
+      }
+    }
+
+        // Function to load and play YouTube video
+    function loadYoutubeVideo(filePath) {	
+      const youtubeContainer = document.getElementById('youtubePlayerContainer');
+      const videoPlayer = document.getElementById('videoPlayer')
+
+	  // If the player exists from a previous video, remove it to avoid conflicts
+	  if (youtubePlayer){
+		youtubePlayer.remove();
+		player_IsReady = false;
+		player_isInitialized = false;
+	  }
+		
+	  // Recreate the iframe element
+	  youtubePlayer = document.createElement('iframe');
+	  youtubePlayer.id = 'youtubePlayer';
+	  youtubePlayer.width = '1120';
+	  youtubePlayer.height = '630';	 	  
+	  youtubePlayer.frameBorder = '0';
+	  youtubePlayer.allow = 'autoplay; encrypted-media';
+	  youtubePlayer.style.display = 'block';
+	  youtubeContainer.appendChild(youtubePlayer);
+
+      if(videoPlayer.style.display = 'block')
+		videoPlayer.style.display = 'none';      // Hide the local file video player
+
+      const videoId = extractYoutubeId(filePath);
+      youtubePlayer.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`;
+
+      // Initialize YouTube player
+      youtubePlayer.onload = function() {
+        youtubePlayerInstance = new YT.Player('youtubePlayer', {
+          events: {
+		    'onReady': onPlayerReady,
+            'onStateChange': onPlayerStateChange
+          }
+        });
+		player_isInitialized = true;
+		console.log('YouTube player initialized')
+      };
+	  
+    }
+
+    // Function to load and play IPTV stream
+    function loadIptvStream(filePath) {
+      const iptvPlayer = document.getElementById('iptvPlayer');
+      const videoPlayer = document.getElementById('videoPlayer');
+      const youtubePlayer = document.getElementById('youtubePlayer');
+
+      iptvPlayer.style.display = 'block';  // Show IPTV video player
+      videoPlayer.style.display = 'none';   // Hide local file video player
+      youtubePlayer.style.display = 'none'; // Hide YouTube player
+
+      const streamUrl = filePath.replace(`/vid/${foldernameify(document.getElementById('showSelector').value)}/`, '');
+
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(streamUrl);
+        hls.attachMedia(iptvPlayer);
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+          iptvPlayer.play();
+        });
+      } else if (iptvPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+        // Support for Safari
+        iptvPlayer.src = streamUrl;
+        iptvPlayer.play();
+      }
+
+      // Event listener for when the IPTV stream ends
+      iptvPlayer.onended = function() {
+        fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+          .then(response => response.json())
+          .then(data => {
+            const nextStreamUrl = data.filePath.replace(`/vid/${foldernameify(document.getElementById('showSelector').value)}/`, '');
+
+            if (Hls.isSupported()) {
+              hls.loadSource(nextStreamUrl);
+              hls.attachMedia(iptvPlayer);
+              hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                iptvPlayer.play();
+              });
+            } else if (iptvPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+              iptvPlayer.src = nextStreamUrl;
+              iptvPlayer.play();
+            }
+          });
+      };
+    }
+
+	//Function onEnded video file
+	function OnendedVideo(){
+	    console.log('💥💥💥Onended event fired');
+		console.log('Current show is... ' + foldernameify(document.getElementById('showSelector').value))
+		console.log('🐶 Next, FETCH next episode code')
+        fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+			  .then(response => {
+				console.log('should be success')
+				console.log('🦴 Raw response:', response);
+				return response.json();
+			  })
+			  .then(data => {
+				console.log('🦴 Parsed data:', data);
+				videoPlayer.src = data.filePath;
+				console.log('Next, Attempting to play video with path from data |||')
+				videoPlayer.play();
+				console.log('should be success')
+			  })
+	}
+
+    // Function to handle when the YouTube video ends
+    function onPlayerStateChange(event) {
+	  const showName = foldernameify(document.getElementById('showSelector').value);
+	  
+
+      if (event.data === YT.PlayerState.ENDED) {
+				console.log('youtube video ended')
+				
+				// Reset saved time to zero when the video ends
+				localStorage.setItem(showName, '0');
+
+				// Clear the interval as the video has ended
+				clearInterval(saveTimeInterval);
+				
+				youtubePlayerInstance.destroy()
+				player_IsReady = false;
+				player_isInitialized = false;
+				youtubePlayerInstance = null; // Set it to null to avoid accidental reuse
+				console.log('YouTube player instance destroyed');
+				
+				fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+				  .then(response => response.json())
+				  .then(data => {
+					loadYoutubeVideo(data.filePath)					
+				  });
+      }
+	  
+		  else if (event.data === YT.PlayerState.PLAYING) {
+			// Clear any existing interval (if set)
+			clearInterval(saveTimeInterval);
+
+				// Start saving the current playback time every second
+				saveTimeInterval = setInterval(() => {
+						if (youtubePlayerInstance && youtubePlayerInstance.getCurrentTime) {
+							const currentTime = youtubePlayerInstance.getCurrentTime();
+							localStorage.setItem(foldernameify(document.getElementById('showSelector').value), currentTime);
+						}
+				}, 1000); // Save time every second
+			}
+			
+			  // Detect when the player is paused (state 2), and stop saving time
+			  else if (event.data === YT.PlayerState.PAUSED) {
+				clearInterval(saveTimeInterval);
+			  }
+    }
+
+	function onPlayerReady(event){
+		player_IsReady = true;
+	}
+	
+	function onYouTubeIframeAPIReady() {
+		api_IsReady = true;
+	}
+ 
+ // Function to stop any current playback
+    function stopCurrentPlayback() {
+      // Stop and reset the local file video player
+      const videoPlayer = document.getElementById('videoPlayer');
+      videoPlayer.pause();
+      videoPlayer.src = '';
+      videoPlayer.style.display = 'none';  // Hide the video player
+
+      // Stop and reset the YouTube player
+      const youtubePlayer = document.getElementById('youtubePlayer');
+      const player = document.querySelector('#youtubePlayer');
+      if (player) {
+        player.src = ''; // Remove src to stop it
+      }
+
+      // Stop and reset the IPTV video player
+      const iptvPlayer = document.getElementById('iptvPlayer');
+      iptvPlayer.pause();
+      iptvPlayer.src = '';
+      iptvPlayer.style.display = 'none'; // Hide the IPTV player
+    }
+
+	//Keyboard shortcuts
+    document.addEventListener('keydown', (event) => {
+            const key = event.key;
+
+            if (key === 'c') {
+				eventResume()
+            }
+    })
+  
+	function waitForTrue() {
+	  return new Promise((resolve) => {
+		const interval = setInterval(() => {
+		console.log("Waiting for variable to turn true..."); // Print message while waiting
+		console.log('Is player ready?: ' + player_IsReady + '\nIs API ready?: ' + api_IsReady + '\nIs player initialized?:' + player_isInitialized)
+		  if (player_IsReady && api_IsReady && player_isInitialized) {
+			clearInterval(interval);
+			resolve();
+		  }
+		}, 1000); // check every 100ms
+	  });
+	}
+
+    // Load the YouTube Iframe API asynchronously
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    var firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+  </script>
+</body>
+</html>

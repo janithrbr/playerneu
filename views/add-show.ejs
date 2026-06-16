@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Show</title>
+</head>
+<body>
+  <h1>Add Show</h1>
+  
+  <form action="/add-show" method="POST">
+    <label for="showName">Enter show name:</label>
+    <input type="text" id="showName" name="showName" required><br><br>
+
+    <label for="episodes">Enter list of episodes:</label>
+    <textarea id="episodes" name="episodes" rows="5" cols="30" required></textarea><br><br>
+
+    <label for="showType">Select show type:</label>
+    <select id="showType" name="showType" required>
+      <option value="file">File</option>
+      <option value="youtube">YouTube</option>
+      <option value="iptv">IPTV</option>
+    </select><br><br>
+
+    <button type="submit">Add</button>
+  </form>
+</body>
+</html>

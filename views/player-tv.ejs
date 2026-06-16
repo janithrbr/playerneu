@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlayerNeu TV</title>
+</head>
+<body>
+  <div>
+  <h1>PlayerNeu TV</h1>
+
+  <!-- Dropdown to select the show (kept, but not used for scheduling) -->
+  <label for="showSelector">Select a show:</label>
+  <select id="showSelector">
+    <!-- Options will be populated dynamically -->
+  </select>
+
+  <!-- Button to load the selected show (kept, but not required for scheduled shows) -->
+  <button id="getShowBtn">Get show</button>
+  
+    <input type="checkbox" id="chkResume" checked>
+<label for="chkResume">Resume Playback</label>
+    
+    <!-- Button to resume/continue  -->
+  <button id="resumeBtn">Resume/continue</button>
+
+  <!-- HTML Video element to play local files -->
+  <video id="videoPlayer" controls></video>
+
+	<div id="youtubePlayerContainer">
+		  <!-- YouTube iframe (hidden for now) -->
+		  <iframe id="youtubePlayer" width="1120" height="630" frameborder="0" allow="autoplay; encrypted-media" style="display:none;"></iframe>
+	</div>
+
+  <!-- IPTV video element (hidden for now) -->
+  <video id="iptvPlayer" controls style="display:none;"></video>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="/views/functions/foldernameify.js"></script>
+  <script src="/views/functions/extractYoutubeId.js"></script>
+  <script src="/views/functions/titleify.js"></script>
+  
+  <script>
+	let iptvTimer = null;
+	let savedTimeStamp = null
+	let showType = null
+	let saveTimeInterval;
+	let youtubePlayerInstance;
+	let isPlayerReady = false;
+
+    // Page load
+    document.addEventListener('DOMContentLoaded', async function () {
+	// (function to populate the dropdown and automatically select scheduled show)
+      const showSelector = document.getElementById('showSelector');
+
+      // Populate the dropdown with available shows
+      const response = await fetch('/shows-list');
+      const data = await response.json();
+
+      data.forEach(show => {
+        const option = document.createElement('option');
+        option.value = show;
+        option.textContent = titleify(show);
+        showSelector.appendChild(option);
+      });
+
+      // Fetch scheduled show name and select it in the dropdown
+	  console.log('Attempting to automatically get the show and set it as the value in dropdown')
+      const scheduledShowName = await getScheduledShowName();
+	  console.log('Name received is... ' + scheduledShowName)
+      if (scheduledShowName) {
+        const titleCaseShowName = titleify(scheduledShowName);
+        for (let i = 0; i < showSelector.options.length; i++) {
+          if (showSelector.options[i].textContent === titleCaseShowName) {
+            showSelector.selectedIndex = i;
+            break;
+          }
+        }
+
+        // Programmatically run the "eventGetShow()" function
+        eventGetShow();
+      }
+    });
+
+	//"Resume" button
+	document.getElementById('resumeBtn').addEventListener('click', function() {
+		console.log('💥💥💥Resume button click event fired')
+		console.log('Next, attempting to run eventResume logic |||')
+		eventResume()
+    });
+
+
+	// "Get show" logic/code
+	function eventGetShow(){
+	  console.log('should be success')
+	  const showName = document.getElementById('showSelector').value;
+      const currentShowName = foldernameify(showName);
+	  
+	  console.log('Next, attempting to read savedTimeStamp from localStorage and save it to global variable')
+	  savedTimeStamp = localStorage.getItem(foldernameify(showName));
+	  console.log('should be success')
+	  console.log('The value saved to global variable is... ' + savedTimeStamp)
+	  
+
+      fetch(`/get-show-data?show=${currentShowName}`)
+        .then(response => response.json())
+        .then(data => {
+          stopCurrentPlayback(); // Stop any current playback before switching
+		  
+		  console.log('Next, attempting to save show type into global variable')
+		  showType = data.type
+		  console.log('The value saved to global variable is... ' + showType)
+
+          if (showType=== 'file') {
+            loadLocalFile(data.filePath);
+          } else if (showType === 'youtube') {
+            loadYoutubeVideo(data.filePath);
+          } else if (showType === 'iptv') {
+            loadIptvStream(data.filePath);
+          }
+		  
+		  // Check if the "Resume playback" checkbox is checked
+		  if (document.getElementById('chkResume').checked) {
+			eventResume()
+		  }
+        });
+		
+	}
+
+	//"Resume" logic/code
+	function eventResume(){
+		console.log('inside the eventResume function')
+		console.log('🔷IF: checking show type')
+		if  (showType == 'file'){
+			console.log('Case 1: show type is file')
+			const videoPlayer = document.getElementById('videoPlayer');
+			const savedTime = savedTimeStamp
+			console.log('saved time read from localStorage is... ' + savedTime)
+			console.log('Next, attempting to seek to the saved time |||')
+			if (savedTime) {
+			  videoPlayer.currentTime = parseFloat(savedTime);
+			}
+			console.log('should be success')
+		}
+		else if (showType == 'youtube'){
+			console.log('Case 2: show type is youtube')
+		    waitForTrue(() => isPlayerReady).then(() => {
+			    console.log("Player flag is now true!");
+			const savedTime = savedTimeStamp
+			console.log('saved time read from global variable is... ' + savedTime)
+			console.log('Next, attempting to seek to the saved time |||')
+			if (savedTime) {
+				youtubePlayerInstance.seekTo(savedTime, true)
+			}
+			console.log('should be success')
+		    });
+		}
+	}
+
+    function loadLocalFile(filePath) {
+      const videoPlayer = document.getElementById('videoPlayer');
+      videoPlayer.src = filePath;
+      videoPlayer.style.display = 'block'; 
+	  videoPlayer.addEventListener('timeupdate', () => {
+		const currentTime = videoPlayer.currentTime;
+		localStorage.setItem(foldernameify(document.getElementById('showSelector').value), currentTime);
+		scrollToBottom();
+	  });
+	  
+	  videoPlayer.addEventListener('canplay', () => {
+		if (videoPlayer.offsetWidth > 1000) {
+			videoPlayer.style.width = '1000px';
+		}
+	  }, { once: true });
+	  
+      videoPlayer.play();
+
+      //document.getElementById('youtubePlayer').style.display = 'none';
+      document.getElementById('iptvPlayer').style.display = 'none';
+
+	videoPlayer.onended =  function() {
+				console.log('💥💥💥Video ended: onended event fired')
+				OnendedVideo()
+		}
+
+    }
+
+        // Function to load and play YouTube video
+    function loadYoutubeVideo(filePath) {	
+      const youtubeContainer = document.getElementById('youtubePlayerContainer');
+      const videoPlayer = document.getElementById('videoPlayer')
+
+	  // If the player exists from a previous video, remove it to avoid conflicts
+	  if (youtubePlayer)
+		youtubePlayer.remove();
+		
+	  // Recreate the iframe element
+	  youtubePlayer = document.createElement('iframe');
+	  youtubePlayer.id = 'youtubePlayer';
+	  youtubePlayer.width = '1120';
+	  youtubePlayer.height = '630';	  
+	  youtubePlayer.frameBorder = '0';
+	  youtubePlayer.allow = 'autoplay; encrypted-media';
+	  youtubePlayer.style.display = 'block';
+	  youtubeContainer.appendChild(youtubePlayer);
+
+      if(videoPlayer.style.display = 'block')
+		videoPlayer.style.display = 'none';      // Hide the local file video player
+
+      youtubePlayer.src = extractYoutubeId(filePath);
+
+      // Initialize YouTube player
+      youtubePlayer.onload = function() {
+        youtubePlayerInstance = new YT.Player('youtubePlayer', {
+          events: {
+		    'onReady': onPlayerReady,
+            'onStateChange': onPlayerStateChange
+          }
+        });
+		console.log('YouTube player initialized')
+      };
+	  
+    }
+
+	function loadIptvStream(filePath) {
+  const iptvPlayer = document.getElementById('iptvPlayer');
+  const videoPlayer = document.getElementById('videoPlayer');
+  const youtubePlayer = document.getElementById('youtubePlayer');
+
+  // Show the IPTV player and hide others
+  iptvPlayer.style.display = 'block';  
+  videoPlayer.style.display = 'none';   
+  //youtubePlayer.style.display = 'none'; 
+
+  const streamUrl = filePath.replace(`/vid/${foldernameify(document.getElementById('showSelector').value)}/`, '');
+
+  if (Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(streamUrl);
+    hls.attachMedia(iptvPlayer);
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      iptvPlayer.play();
+    });
+  } else if (iptvPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+    iptvPlayer.src = streamUrl;
+    iptvPlayer.play();
+  }
+
+  // Clear any existing timer to prevent duplicate checks
+  if (iptvTimer) {
+    clearInterval(iptvTimer);
+  }
+
+  // Set a timer to check every 10 minutes (600,000 ms)
+  iptvTimer = setInterval(() => {
+    getScheduledShowName().then(scheduledShowName => {
+      // If the scheduled show has changed, switch to it
+      if (titleify(scheduledShowName) !== document.getElementById('showSelector').selectedOptions[0].textContent) {
+        const titleCaseShowName = titleify(scheduledShowName);
+        document.getElementById('showSelector').value = titleCaseShowName;
+        eventGetShow();
+      }
+    });
+  }, 600000);  // 600,000 milliseconds = 10 minutes
+
+
+  iptvPlayer.onended = function() {
+    // This won't trigger for continuous streams, but we keep it as a fallback
+    fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+      .then(response => response.json())
+      .then(data => {
+        const nextStreamUrl = data.filePath.replace(`/vid/${foldernameify(document.getElementById('showSelector').value)}/`, '');
+
+        if (Hls.isSupported()) {
+          hls.loadSource(nextStreamUrl);
+          hls.attachMedia(iptvPlayer);
+          hls.on(Hls.Events.MANIFEST_PARSED, function() {
+            iptvPlayer.play();
+          });
+        } else if (iptvPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+          iptvPlayer.src = nextStreamUrl;
+          iptvPlayer.play();
+        }
+      });
+  };
+  
+  //width here
+  iptvPlayer.width = 1100;
+  iptvPlayer.addEventListener('loadedmetadata', () => {
+  scrollToBottom();
+}, { once: true });
+}
+
+    // Function to handle when the YouTube video ends
+    function onPlayerStateChange(event) {
+	  const showName = foldernameify(document.getElementById('showSelector').value);
+	  
+
+      if (event.data === YT.PlayerState.ENDED) {
+				console.log('youtube video ended')
+				//console.log('youtube: scheduled show at ENDED is **** ' + getScheduledShowName())
+				// Reset saved time to zero when the video ends
+				localStorage.setItem(showName, '0');
+
+				// Clear the interval as the video has ended
+				clearInterval(saveTimeInterval);
+				
+				youtubePlayerInstance.destroy()
+				youtubePlayerInstance = null; // Set it to null to avoid accidental reuse
+				console.log('YouTube player instance destroyed');
+				
+				// Fetch the scheduled show name
+				getScheduledShowName().then(scheduledShowName => {
+				  // Check if the scheduled show name matches the currently selected value in the dropdown
+				  if (titleify(scheduledShowName) === document.getElementById('showSelector').selectedOptions[0].textContent) {
+					fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+					  .then(response => response.json())
+					  .then(data => {
+						loadYoutubeVideo(data.filePath)
+					  });
+				  }
+				  else {
+					// Update dropdown with the new scheduled show name and run eventGetShow()
+					fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+					const titleCaseShowName = titleify(scheduledShowName);
+					document.getElementById('showSelector').value = titleCaseShowName;
+					eventGetShow();
+				  }
+			});
+		  }				  
+	  
+		  else if (event.data === YT.PlayerState.PLAYING) {
+			// Clear any existing interval (if set)
+			clearInterval(saveTimeInterval);
+
+				// Start saving the current playback time every second
+				saveTimeInterval = setInterval(() => {
+						if (youtubePlayerInstance && youtubePlayerInstance.getCurrentTime) {
+							const currentTime = youtubePlayerInstance.getCurrentTime();
+							localStorage.setItem(showName, currentTime);
+						}
+                        scrollToBottom();
+				}, 1000); // Save time every second
+			}
+			
+			  // Detect when the player is paused (state 2), and stop saving time
+			  else if (event.data === YT.PlayerState.PAUSED) {
+				clearInterval(saveTimeInterval);
+			  }
+    }
+
+
+	async function OnendedVideo(){
+		console.log('inside OnendedVideo function')
+		console.log('Current show is...... ' + foldernameify(document.getElementById('showSelector').value))
+		
+		// Fetch the scheduled show name
+		console.log('Next, attempting get scheduled show name |||')
+		const scheduledShowName = await getScheduledShowName();
+		console.log('should be success')
+		console.log("Scheduled show recieved at video end is...... " + titleify(scheduledShowName))
+
+		  // Check if the scheduled show name matches the currently selected value in the dropdown
+		  if (titleify(scheduledShowName) === document.getElementById('showSelector').selectedOptions[0].textContent) {
+		  
+			console.log('current show and scheduled show: MATCH')
+			console.log('Next, executing fetch next episode code |||')
+			
+			fetch(`/next-episode?show=${foldernameify(document.getElementById('showSelector').value)}`)
+				  .then(response => {
+					console.log('should be success')
+					console.log('Raw response:', response);
+					return response.json();
+				  })
+				  .then(data => {
+					console.log('Parsed data:', data);
+					videoPlayer.src = data.filePath;
+					console.log('Next, Attempting to play video with path from data |||')
+					videoPlayer.play();
+					console.log('should be success')
+				  })
+		  } else {
+			// Update dropdown with the new scheduled show name and run eventGetShow()
+			const titleCaseShowName = titleify(scheduledShowName);
+			console.log('targeting dropdown update to>>> ' + titleCaseShowName);
+			document.getElementById('showSelector').value = titleCaseShowName;
+			console.log('dropdown selected value after updating >>> ' + document.getElementById('showSelector').value)
+			eventGetShow();
+			}
+	}
+
+    // Function to fetch scheduled show name
+async function getScheduledShowName() {
+	console.log('fetching function')
+  console.trace('getScheduledShowName called');
+
+  try {
+    const response = await fetch('/get-scheduled-show-name');
+    const data = await response.json();
+    return data.scheduledShowName;
+  } catch (error) {
+    console.error('Error fetching scheduled show name:', error);
+    return null;
+  }
+}
+
+	function onPlayerReady(event){
+		isPlayerReady = true;
+	}
+ 
+    function stopCurrentPlayback() {
+      const videoPlayer = document.getElementById('videoPlayer');
+      videoPlayer.pause();
+      videoPlayer.src = '';
+      videoPlayer.style.display = 'none';
+
+      const youtubePlayer = document.getElementById('youtubePlayer');
+      if (youtubePlayer) {
+        youtubePlayer.src = ''; 
+      }
+
+      const iptvPlayer = document.getElementById('iptvPlayer');
+      iptvPlayer.pause();
+      iptvPlayer.src = '';
+      iptvPlayer.style.display = 'none';
+	  
+	  // Clear the IPTV timer when stopping playback
+	  if (iptvTimer) {
+		clearInterval(iptvTimer);
+		iptvTimer = null;
+	  }
+    }
+
+	//Keyboard shortcuts
+    document.addEventListener('keydown', (event) => {
+            const key = event.key;
+
+            if (key === 'c') {
+				eventResume()
+            }
+    })
+
+	function waitForTrue(isPlayerReady) {
+	  return new Promise((resolve) => {
+		const interval = setInterval(() => {
+		  console.log("Waiting for variable to turn true..."); // Print message while waiting
+		  if (isPlayerReady()) {
+			clearInterval(interval);
+			resolve();
+		  }
+		}, 1000); // check every 100ms
+	  });
+	}
+
+	function scrollToBottom() {
+	  const windowHeight = window.innerHeight;
+	  const currentPosition = window.pageYOffset;
+	  const pageHeight = document.body.scrollHeight;
+
+	  if (currentPosition + windowHeight < pageHeight) {
+		window.scrollTo(0, document.body.scrollHeight);
+	  }
+	}
+
+
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    var firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+  </script>
+</body>
+</html>
