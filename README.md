@@ -7,7 +7,23 @@ The PlayerNeu media player application.
 - Node.js
 - npm (usually comes with Node.js)
  
-You can check if Node.js is installed:
+### Installing Node.js
+ 
+#### Windows
+ 
+1. Download the Windows Installer (.msi) from the [Node.js website](https://nodejs.org/en/download/current).
+2. Run the installer and follow the setup wizard.
+ 
+#### macOS
+ 
+	brew install node
+ 
+#### Linux (Ubuntu/Debian)
+ 
+	sudo apt update
+	sudo apt install nodejs npm
+ 
+#### Verify Installation 
  
 	node -v
 	npm -v
